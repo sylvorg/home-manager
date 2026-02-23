@@ -99,19 +99,28 @@ in
           lib.mapAttrsToList (n: v: v.target) (lib.filterAttrs (n: v: v.force) cfg)
         );
 
+        copiedPaths = lib.concatMapStringsSep " " (p: ''"$HOME"/${lib.escapeShellArg p}'') (
+          lib.mapAttrsToList (n: v: v.target) (lib.filterAttrs (n: v: v.mode != "symlink") cfg)
+        );
+
         storeDir = lib.escapeShellArg builtins.storeDir;
 
         check = pkgs.replaceVars ./files/check-link-targets.sh {
           inherit (config.lib.bash) initHomeManagerLib;
-          inherit forcedPaths storeDir;
+          inherit forcedPaths copiedPaths storeDir;
         };
       in
       ''
         function checkNewGenCollision() {
-          local newGenFiles
+          local newGenFiles oldGenFiles
           newGenFiles="$(readlink -e "$newGenPath/home-files")"
+          if [[ ! -v oldGenPath || ! -e "$oldGenPath/home-files" ]] ; then
+            oldGenFiles=""
+          else
+            oldGenFiles="$(readlink -e "$oldGenPath/home-files")"
+          fi
           find "$newGenFiles" \( -type f -or -type l \) \
-              -exec bash ${check} "$newGenFiles" {} +
+          -exec bash ${check} "$newGenFiles" "$oldGenFiles" {} +
         }
 
         checkNewGenCollision || exit 1
@@ -123,7 +132,7 @@ in
     # 1. Remove files from the old generation that are not in the new
     #    generation.
     #
-    # 2. Symlink files from the new generation into $HOME.
+    # 2. Symlink/copy files from the new generation into $HOME.
     #
     # This order is needed to ensure that we always know which links
     # belong to which generation. Specifically, if we're moving from
@@ -138,40 +147,93 @@ in
     # source and target generation.
     home.activation.linkGeneration = lib.hm.dag.entryAfter [ "writeBoundary" ] (
       let
+        modes = lib.toShellVar "modes" (lib.mapAttrs' (n: v: lib.nameValuePair v.target v.mode) cfg);
+
         link = pkgs.writeShellScript "link" ''
           ${config.lib.bash.initHomeManagerLib}
 
+          ${modes}
+
+          function getMode() {
+            local path="$1"
+            local mode="''${modes["$path"]}"
+
+            if [[ -n $mode && $mode != symlink ]]; then
+              echo "$mode"
+            fi
+          }
+
+          function isCopiedSubPath() {
+            local path="$1"
+
+            for modePath in "''${!modes[@]}"; do
+              if [[ $path == "$modePath" ]]; then
+                return 1
+              fi
+            done
+
+            for modePath in "''${!modes[@]}"; do
+              if [[ $path == "$modePath"* ]]; then
+                local mode
+                mode="$(getMode "$modePath")"
+
+                if [[ -z $mode ]]; then
+                  return 1
+                else
+                  return 0
+                fi
+              fi
+            done
+
+            errorEcho "'$path' does not mach a modePath nor is it a subpath of any modePath"
+            exit 1
+          }
+
           newGenFiles="$1"
-          shift
+          oldGenFiles="$2"
+          shift 2
           for sourcePath in "$@" ; do
             relativePath="''${sourcePath#$newGenFiles/}"
             targetPath="$HOME/$relativePath"
-            if [[ -e "$targetPath" && ! -L "$targetPath" ]] ; then
-              if [[ -n "$HOME_MANAGER_BACKUP_COMMAND" ]] ; then
-                verboseEcho "Running $HOME_MANAGER_BACKUP_COMMAND $targetPath."
-                run $HOME_MANAGER_BACKUP_COMMAND "$targetPath" || errorEcho "Running `$HOME_MANAGER_BACKUP_COMMAND` on '$targetPath' failed."
-              elif [[ -n "$HOME_MANAGER_BACKUP_EXT" ]] ; then
-                # The target exists, back it up
-                backup="$targetPath.$HOME_MANAGER_BACKUP_EXT"
-                if [[ -e "$backup" && -n "$HOME_MANAGER_BACKUP_OVERWRITE" ]]; then
-                  run rm $VERBOSE_ARG "$backup"
-                fi
-                run mv $VERBOSE_ARG "$targetPath" "$backup" || errorEcho "Moving '$targetPath' failed!"
-              fi
+            oldSourcePath="$oldGenFiles/$relativePath"
+            mode="$(getMode "$relativePath")"
+
+            if isCopiedSubPath "$relativePath"; then
+              continue
             fi
 
-            if [[ -e "$targetPath" && ! -L "$targetPath" ]] && cmp -s "$sourcePath" "$targetPath" ; then
+            # The target exists, and
+            if [[ -e "$targetPath" && ! -L "$targetPath" && -n "$HOME_MANAGER_BACKUP_EXT" &&
+                  # should not be copied, or
+                  (-z $mode ||
+                     # is not identical to source, and
+                     (! $(cmp -s "$sourcePath" "$targetPath") &&
+                       # there's no old version, or
+                       (! -e "$oldSourcePath" ||
+                        # it's not equal to the old version either
+                        ! $(cmp -s "$oldSourcePath" "$targetPath")))) ]] ; then
+              # back it up
+              backup="$targetPath.$HOME_MANAGER_BACKUP_EXT"
+              run mv $VERBOSE_ARG "$targetPath" "$backup" || errorEcho "Backup: Moving '$targetPath' failed!"
+            fi
+
+            if [[ -e "$targetPath" && ! -L "$targetPath" ]] && cmp -s "$sourcePath" "$targetPath"; then
               # The target exists but is identical – don't do anything.
               verboseEcho "Skipping '$targetPath' as it is identical to '$sourcePath'"
-            else
+            elif [[ -z $mode ]]; then
               # Place that symlink, --force
               # This can still fail if the target is a directory, in which case we bail out.
               run mkdir -p $VERBOSE_ARG "$(dirname "$targetPath")"
               run ln -Tsf $VERBOSE_ARG "$sourcePath" "$targetPath" || exit 1
+            else
+              # Copy that file, --force
+              # This can still fail if the target is a directory, in which case we bail out.
+              run mkdir -p $VERBOSE_ARG "$(dirname "$targetPath")"
+              run cp -TLf $VERBOSE_ARG "$sourcePath" "$targetPath" || exit 1
+              run chmod $VERBOSE_ARG $mode "$targetPath"
             fi
           done
         '';
-
         cleanup = pkgs.writeShellScript "cleanup" ''
           ${config.lib.bash.initHomeManagerLib}
 
@@ -213,10 +275,15 @@ in
         function linkNewGen() {
           _i "Creating home file links in %s" "$HOME"
 
-          local newGenFiles
+          local newGenFiles oldGenFiles
           newGenFiles="$(readlink -e "$newGenPath/home-files")"
+          if [[ ! -v oldGenPath || ! -e "$oldGenPath/home-files" ]] ; then
+             oldGenFiles=""
+          else
+             oldGenFiles="$(readlink -e "$oldGenPath/home-files")"
+          fi
           find "$newGenFiles" \( -type f -or -type l \) \
-            -exec bash ${link} "$newGenFiles" {} +
+          -exec bash ${link} "$newGenFiles" "$oldGenFiles" {} +
         }
 
         function cleanOldGen() {
