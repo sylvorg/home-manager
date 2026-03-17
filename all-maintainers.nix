@@ -564,6 +564,13 @@
     name = "Alex Rice";
     source = "nixpkgs";
   };
+  alinnow = {
+    email = "alin@alin.ovh";
+    github = "alinnow";
+    githubId = 850317;
+    name = "Alin";
+    source = "nixpkgs";
+  };
   ambroisie = {
     email = "bruno.nixpkgs@belanyi.fr";
     github = "ambroisie";
@@ -1425,7 +1432,7 @@
     github = "karaolidis";
     githubId = 46189100;
     name = "Nikolaos Karaolidis";
-    source = "home-manager";
+    source = "nixpkgs";
   };
   khaneliman = {
     email = "khaneliman12@gmail.com";
@@ -1487,12 +1494,6 @@
     github = "lheckemann";
     githubId = 341954;
     name = "Linus Heckemann";
-    source = "home-manager";
-  };
-  libewa = {
-    email = "libewa-git@icloud.com";
-    github = "libewa";
-    githubId = 67926131;
     source = "home-manager";
   };
   lilyinstarlight = {
@@ -1568,6 +1569,13 @@
     github = "malte-v";
     githubId = 34393802;
     name = "Malte Voos";
+    source = "nixpkgs";
+  };
+  mana-byte = {
+    email = "manaikilaut@gmail.com";
+    github = "mana-byte";
+    githubId = 93316844;
+    name = "Manaiki Laut";
     source = "nixpkgs";
   };
   mateusauler = {
@@ -1653,11 +1661,11 @@
     source = "nixpkgs";
   };
   mikaeladev = {
-    email = "mikaeladev@users.noreply.github.com";
+    email = "mikaeladev@icloud.com";
     github = "mikaeladev";
     githubId = 100416544;
     name = "mikaeladev";
-    source = "home-manager";
+    source = "nixpkgs";
   };
   mikilio = {
     email = "official.mikilio+dev@gmail.com";
@@ -2036,6 +2044,13 @@
     githubId = 20300874;
     name = "Mohammad Rafiq";
     source = "nixpkgs";
+  };
+  rsahwe = {
+    email = "rsahwe@gmx.net";
+    github = "rsahwe";
+    githubId = 201613730;
+    name = "rsahwe";
+    source = "home-manager";
   };
   rszamszur = {
     email = "radoslawszamszur@gmail.com";
