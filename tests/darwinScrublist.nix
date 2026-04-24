@@ -30,6 +30,7 @@ let
     "calibre"
     "carapace"
     "cava"
+    "chromium"
     "claude-code"
     "clock-rs"
     "cmus"
@@ -65,6 +66,9 @@ let
     "gitMinimal"
     "gnupg"
     "go"
+    "google-chrome"
+    "google-chrome-beta"
+    "google-chrome-dev"
     "gradle"
     "granted"
     "helix"
@@ -83,6 +87,7 @@ let
     "jujutsu"
     "k9s"
     "kakoune"
+    "keepassxc"
     "khal"
     "khard"
     "kitty"
@@ -200,7 +205,7 @@ let
 
   # Create an overlay that scrubs packages in the scrublist
   packageScrubOverlay =
-    self: super:
+    _self: super:
     lib.mapAttrs (
       name: value:
       if lib.elem name packagesToScrub then

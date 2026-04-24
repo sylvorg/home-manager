@@ -141,7 +141,7 @@ let
   toThunderbirdAccount =
     account: profile:
     let
-      id = account.id;
+      inherit (account) id;
       addresses = [ account.address ] ++ account.aliases;
     in
     {
@@ -183,6 +183,30 @@ let
           3;
       "mail.smtpserver.smtp_${id}.username" = account.userName;
     }
+    // optionalAttrs (account.ews != null) {
+      "mail.smtpserver.ews_${id}.type" = "ews";
+      "mail.outgoingserver.ews_${id}.auth_method" = 3;
+      "mail.outgoingserver.ews_${id}.ews_url" = account.ews.serviceDescriptionURL;
+      "mail.outgoingserver.ews_${id}.key" = "ews_${id}";
+      "mail.outgoingserver.ews_${id}.username" = account.userName;
+
+      "mail.server.server_${id}.directory" = "${thunderbirdProfilesPath}/${profile.name}/Mail/${id}";
+      "mail.server.server_${id}.directory-rel" = "[ProfD]Mail/${id}";
+      "mail.server.server_${id}.hostname" = account.ews.host;
+      "mail.server.server_${id}.ews_url" = account.ews.serviceDescriptionURL;
+      "mail.server.server_${id}.login_at_startup" = true;
+      "mail.server.server_${id}.name" = account.name;
+      "mail.server.server_${id}.port" = 443;
+      "mail.server.server_${id}.socketType" =
+        if !account.ews.tls.enable then
+          0
+        else if account.ews.tls.useStartTls then
+          2
+        else
+          3;
+      "mail.server.server_${id}.type" = "ews";
+      "mail.server.server_${id}.userName" = account.userName;
+    }
     // builtins.foldl' (a: b: a // b) { } (map (address: toThunderbirdSMTP account address) addresses)
     // optionalAttrs (account.smtp != null && account.primary) {
       "mail.smtp.defaultserver" = "smtp_${id}";
@@ -220,14 +244,15 @@ let
     }
     // optionalAttrs (calendar.thunderbird.color != "") {
       "calendar.registry.calendar_${id}.color" = calendar.thunderbird.color;
-    };
+    }
+    // calendar.thunderbird.settings id;
 
   toThunderbirdContact =
     contact: _:
     let
       inherit (contact) id;
     in
-    lib.filterAttrs (n: v: v != null) (
+    lib.filterAttrs (_n: v: v != null) (
       {
         "ldap_2.servers.contact_${id}.description" = contact.name;
         "ldap_2.servers.contact_${id}.filename" = "contact_${id}.sqlite"; # this is needed for carddav to work
@@ -246,7 +271,7 @@ let
   toThunderbirdFeed =
     feed: profile:
     let
-      id = feed.id;
+      inherit (feed) id;
     in
     {
       "mail.account.account_${id}.server" = "server_${id}";
@@ -294,7 +319,7 @@ let
       version="9"
       logging="no"
     ''
-    + lib.concatStrings (map (f: mkFilterToIniString f) filters);
+    + lib.concatStrings (map mkFilterToIniString filters);
 
   getAccountsForProfile =
     profileName: accounts:
@@ -496,7 +521,7 @@ in
                       inherit (args) config;
                       inherit lib pkgs;
                       appName = "Thunderbird";
-                      package = cfg.package;
+                      inherit (cfg) package;
                       modulePath = [
                         "programs"
                         "thunderbird"
@@ -746,6 +771,37 @@ in
               example = "#dc8add";
               description = "Display color of the calendar in hex";
             };
+
+            settings = mkOption {
+              type =
+                with types;
+                functionTo (
+                  attrsOf (oneOf [
+                    bool
+                    int
+                    str
+                  ])
+                );
+              default = _: { };
+              defaultText = literalExpression "_: { }";
+              example = literalExpression ''
+                id: {
+                  "calendar.registry.''${id}.refreshInterval" = 5;
+
+                  # If "my-awesome-account" is the attribute name of an email account under
+                  # `config.accounts.email.accounts`, the below snippet links this calendar
+                  # account to "my-awesome-account".
+
+                  "calendar.registry.''${id}.imip.identity.key" =
+                    "id_''${builtins.hashString "sha256" "my-awesome-account"}";
+                };
+              '';
+              description = ''
+                Extra settings to add to this Thunderbird calendar configuration.
+                The {var}`id` given as argument is an automatically
+                generated account identifier.
+              '';
+            };
           };
         });
     };
@@ -926,6 +982,8 @@ in
                 flatten (map getAliasesWithId emailAccounts);
               smtp = accountsSmtp ++ aliasesSmtp;
 
+              ews = filter (a: a.ews != null) emailAccounts;
+
               feedAccounts = addId (attrValues profile.feedAccounts);
 
               # NOTE: `calendarAccounts` not added here as calendars are not part of the 'Mail' view
@@ -935,7 +993,7 @@ in
                 let
                   accountNameToId = builtins.listToAttrs (
                     map (a: {
-                      name = a.name;
+                      inherit (a) name;
                       value = "account_${a.id}";
                     }) accounts
                   );
@@ -944,7 +1002,7 @@ in
 
                   # Append the default local folder name "account1".
                   # See https://github.com/nix-community/home-manager/issues/5031.
-                  enabledAccountsIds = (lib.attrsets.mapAttrsToList (name: value: value) accountNameToId) ++ [
+                  enabledAccountsIds = (lib.attrsets.mapAttrsToList (_name: value: value) accountNameToId) ++ [
                     "account1"
                   ];
                 in
@@ -956,14 +1014,14 @@ in
                 let
                   accountNameToId = builtins.listToAttrs (
                     map (a: {
-                      name = a.name;
+                      inherit (a) name;
                       value = "calendar_${a.id}";
                     }) calendarAccounts
                   );
 
                   accountsOrderIds = map (a: accountNameToId."${a}" or a) profile.calendarAccountsOrder;
 
-                  enabledAccountsIds = (lib.attrsets.mapAttrsToList (name: value: value) accountNameToId);
+                  enabledAccountsIds = (lib.attrsets.mapAttrsToList (_name: value: value) accountNameToId);
                 in
                 lib.optionals (calendarAccounts != [ ]) (
                   accountsOrderIds ++ (lib.lists.subtractLists accountsOrderIds enabledAccountsIds)
@@ -982,8 +1040,10 @@ in
                     "calendar.list.sortOrder" = concatStringsSep " " orderedCalendarAccounts;
                   })
 
-                  (optionalAttrs (length smtp != 0) {
-                    "mail.smtpservers" = concatStringsSep "," (map (a: "smtp_${a.id}") smtp);
+                  (optionalAttrs (length smtp != 0 || length ews != 0) {
+                    "mail.smtpservers" = concatStringsSep "," (
+                      (map (a: "smtp_${a.id}") smtp) ++ (map (a: "ews_${a.id}") ews)
+                    );
                   })
 
                   { "mail.openpgp.allow_external_gnupg" = profile.withExternalGnupg; }
@@ -998,8 +1058,7 @@ in
             };
 
           "${thunderbirdProfilesPath}/${name}/search.json.mozlz4" = mkIf (profile.search.enable) {
-            enable = profile.search.enable;
-            force = profile.search.force;
+            inherit (profile.search) enable force;
             source = profile.search.file;
           };
 
@@ -1018,7 +1077,7 @@ in
         }
       )
       ++ (mapAttrsToList (
-        name: profile:
+        name: _profile:
         let
           emailAccountsWithFilters = (
             filter (a: a.thunderbird.messageFilters != [ ]) (
