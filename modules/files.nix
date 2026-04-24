@@ -148,7 +148,7 @@ in
         );
 
         copiedPaths = lib.concatMapStringsSep " " (p: ''"$HOME"/${lib.escapeShellArg p}'') (
-          lib.mapAttrsToList (n: v: v.target) (lib.filterAttrs (n: v: v.mode != "symlink") cfg)
+          map (v: v.target) (lib.filter (v: v.mode != "symlink") cfg)
         );
 
         storeDir = lib.escapeShellArg builtins.storeDir;
@@ -195,7 +195,7 @@ in
     # source and target generation.
     home.activation.linkGeneration = lib.hm.dag.entryAfter [ "writeBoundary" ] (
       let
-        modes = lib.toShellVar "modes" (lib.mapAttrs' (n: v: lib.nameValuePair v.target v.mode) cfg);
+        modes = lib.toShellVar "modes" (lib.listToAttrs (map (v: lib.nameValuePair v.target v.mode) cfg));
 
         link = pkgs.writeShellScript "link" ''
           ${config.lib.bash.initHomeManagerLib}
